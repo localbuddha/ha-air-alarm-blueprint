@@ -19,7 +19,8 @@ current alert level, plus voice announcements through TTS.
 - The **Ukraine Alarm** integration, which provides:
   - an aggregate binary sensor that is on while any alert of the category is active;
   - one binary sensor per level (`...(red)`, `...(yellow)`).
-- A `light`, a `tts` entity and a `media_player`.
+- Any color-changeable light entity — a smart bulb, an LED strip (WLED), or a screen —
+  plus a `tts` entity and any `media_player` that supports TTS (a Google speaker or other).
 
 ## Install
 
