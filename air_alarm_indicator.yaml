@@ -1,0 +1,304 @@
+blueprint:
+  name: Ukraine Air Alarm - indicator light + voice announcements
+  description: >
+    Air-raid indicator for the Ukraine Alarm integration. Yellow = drone threat, red =
+    ballistic threat, red wins over yellow. The indicator light stays on for the whole
+    alert and turns off a few minutes after the all clear. On Home Assistant start, if an
+    alert is already active, the speaker reports how long it has been running and the
+    light shows the current level colour; with no active alert nothing happens.
+  domain: automation
+  author: Yurii Nimets
+  source_url: https://github.com/localbuddha/ha-air-alarm-blueprint/blob/main/air_alarm_indicator.yaml
+  homeassistant:
+    min_version: "2026.6.0"
+  input:
+    alarm_sensor:
+      name: Air alarm aggregate sensor
+      description: Binary sensor that is on while any air alert is active, the Ukraine Alarm Air sensor.
+      selector:
+        entity:
+          domain: binary_sensor
+    red_sensor:
+      name: Red level sensor (ballistic threat)
+      selector:
+        entity:
+          domain: binary_sensor
+    yellow_sensor:
+      name: Yellow level sensor (drone threat)
+      selector:
+        entity:
+          domain: binary_sensor
+    indicator_light:
+      name: Indicator light
+      description: A light, a device or a whole area.
+      selector:
+        target:
+          entity:
+            domain: light
+    tts_entity:
+      name: TTS entity
+      selector:
+        entity:
+          domain: tts
+    speaker:
+      name: Speaker
+      selector:
+        entity:
+          domain: media_player
+    brightness_pct:
+      name: Brightness
+      default: 25
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+          mode: slider
+    color_red:
+      name: Colour - red level
+      default: [255, 0, 0]
+      selector:
+        color_rgb: {}
+    color_yellow:
+      name: Colour - yellow level
+      default: [255, 187, 0]
+      selector:
+        color_rgb: {}
+    color_idle:
+      name: Colour - all clear
+      default: [18, 211, 83]
+      selector:
+        color_rgb: {}
+    all_clear_delay:
+      name: Turn the light off this many minutes after the all clear
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: minutes
+    startup_wait:
+      name: Startup wait for the alarm sensor to have a value
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 10
+          unit_of_measurement: minutes
+    language:
+      name: TTS language
+      default: uk
+      selector:
+        text: {}
+    msg_red:
+      name: Message - red level
+      default: Увага! Балістична небезпека
+      selector:
+        text: {}
+    msg_yellow:
+      name: Message - yellow level
+      default: Увага! Дронова небезпека!
+      selector:
+        text: {}
+    msg_all_clear:
+      name: Message - all clear
+      default: Відбій повітряної тривоги.
+      selector:
+        text: {}
+    msg_startup:
+      name: Startup message prefix
+      default: Повітряна тривога триває
+      selector:
+        text: {}
+
+mode: parallel
+max: 5
+
+variables:
+  alarm: !input alarm_sensor
+  red: !input red_sensor
+  yellow: !input yellow_sensor
+  prefix: !input msg_startup
+
+triggers:
+  - trigger: state
+    entity_id: !input yellow_sensor
+    to: "on"
+    id: yellow_on
+    note: "Yellow level - drone threat."
+  - trigger: state
+    entity_id: !input red_sensor
+    to: "on"
+    id: red_on
+    note: "Red level - priority over yellow."
+  - trigger: state
+    entity_id: !input red_sensor
+    to: "off"
+    id: red_off
+    note: "Red lifted, alert still active - fall back to yellow."
+  - trigger: state
+    entity_id: !input alarm_sensor
+    to: "off"
+    id: clear
+    note: "The aggregate sensor is the single all-clear source, so announcements are not duplicated."
+  - trigger: homeassistant
+    event: start
+    id: startup
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: red_on
+        sequence:
+          - action: light.turn_on
+            target: !input indicator_light
+            data:
+              brightness_pct: !input brightness_pct
+              rgb_color: !input color_red
+            continue_on_error: true
+          - action: tts.speak
+            target:
+              entity_id: !input tts_entity
+            data:
+              cache: true
+              media_player_entity_id: !input speaker
+              message: !input msg_red
+              language: !input language
+      - conditions:
+          - condition: trigger
+            id: yellow_on
+          - condition: state
+            entity_id: !input red_sensor
+            state: "off"
+        sequence:
+          - action: light.turn_on
+            target: !input indicator_light
+            data:
+              brightness_pct: !input brightness_pct
+              rgb_color: !input color_yellow
+            continue_on_error: true
+          - action: tts.speak
+            target:
+              entity_id: !input tts_entity
+            data:
+              cache: true
+              media_player_entity_id: !input speaker
+              message: !input msg_yellow
+              language: !input language
+      - conditions:
+          - condition: trigger
+            id: red_off
+          - condition: state
+            entity_id: !input alarm_sensor
+            state: "on"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input red_sensor
+                    state: "on"
+                sequence:
+                  - action: light.turn_on
+                    target: !input indicator_light
+                    data:
+                      brightness_pct: !input brightness_pct
+                      rgb_color: !input color_red
+                    continue_on_error: true
+              - conditions:
+                  - condition: state
+                    entity_id: !input yellow_sensor
+                    state: "on"
+                sequence:
+                  - action: light.turn_on
+                    target: !input indicator_light
+                    data:
+                      brightness_pct: !input brightness_pct
+                      rgb_color: !input color_yellow
+                    continue_on_error: true
+            note: "Level downgraded without a repeated announcement, colour only."
+      - conditions:
+          - condition: trigger
+            id: clear
+        sequence:
+          - action: light.turn_on
+            target: !input indicator_light
+            data:
+              brightness_pct: !input brightness_pct
+              rgb_color: !input color_idle
+            continue_on_error: true
+          - action: tts.speak
+            target:
+              entity_id: !input tts_entity
+            data:
+              cache: true
+              media_player_entity_id: !input speaker
+              message: !input msg_all_clear
+              language: !input language
+          - delay:
+              minutes: !input all_clear_delay
+          - condition: state
+            entity_id: !input alarm_sensor
+            state: "off"
+            note: "If a new alert started during the wait, the light stays on."
+          - action: light.turn_off
+            target: !input indicator_light
+            data:
+              transition: 5
+            continue_on_error: true
+      - conditions:
+          - condition: trigger
+            id: startup
+        sequence:
+          - wait_template: "{{ has_value(alarm) }}"
+            timeout:
+              minutes: !input startup_wait
+            continue_on_timeout: false
+            note: "At boot the alarm sensor may still be unavailable for a few seconds."
+          - condition: state
+            entity_id: !input alarm_sensor
+            state: "on"
+            note: "No alert at startup - no light, no announcement."
+          - variables:
+              source: "{{ red if is_state(red, 'on') else (yellow if is_state(yellow, 'on') else alarm) }}"
+              msg: "{% set st = states[source] %}{% set t = (now() - st.last_changed).total_seconds() %}{% set hh = (t // 3600) | int %}{% set mm = ((t % 3600) // 60) | int %}{% set n10 = hh % 10 %}{% set n100 = hh % 100 %}{% set hf = 'годину' if n10 == 1 and n100 != 11 else ('години' if n10 in [2,3,4] and not (12 <= n100 <= 14) else 'годин') %}{% set m10 = mm % 10 %}{% set m100 = mm % 100 %}{% set mf = 'хвилину' if m10 == 1 and m100 != 11 else ('хвилини' if m10 in [2,3,4] and not (12 <= m100 <= 14) else 'хвилин') %}{% if hh > 0 and mm > 0 %}{{ prefix }} {{ hh }} {{ hf }} та {{ mm }} {{ mf }}.{% elif hh > 0 %}{{ prefix }} {{ hh }} {{ hf }}.{% elif mm > 0 %}{{ prefix }} {{ mm }} {{ mf }}.{% else %}{{ prefix }} менше хвилини.{% endif %}"
+            note: "Duration is measured from the moment the current level began, the aggregate sensor when no level is set."
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input red_sensor
+                    state: "on"
+                sequence:
+                  - action: light.turn_on
+                    target: !input indicator_light
+                    data:
+                      brightness_pct: !input brightness_pct
+                      rgb_color: !input color_red
+                    continue_on_error: true
+              - conditions:
+                  - condition: state
+                    entity_id: !input yellow_sensor
+                    state: "on"
+                sequence:
+                  - action: light.turn_on
+                    target: !input indicator_light
+                    data:
+                      brightness_pct: !input brightness_pct
+                      rgb_color: !input color_yellow
+                    continue_on_error: true
+            default:
+              - action: light.turn_on
+                target: !input indicator_light
+                data:
+                  brightness_pct: !input brightness_pct
+                  rgb_color: !input color_red
+                continue_on_error: true
+            note: "Alert with no level reported - red."
+          - action: tts.speak
+            target:
+              entity_id: !input tts_entity
+            data:
+              cache: true
+              media_player_entity_id: !input speaker
+              language: !input language
+              message: "{{ msg }}"
