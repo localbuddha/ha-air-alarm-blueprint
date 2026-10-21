@@ -6,6 +6,8 @@ blueprint:
     alert and turns off a few minutes after the all clear. On Home Assistant start, if an
     alert is already active, the speaker reports how long it has been running and the
     light shows the current level colour; with no active alert nothing happens.
+    Announcements fire only on genuine level transitions; an unavailable blip re-applies
+    the colour without repeating the announcement.
   domain: automation
   author: Yurii Nimets
   source_url: https://github.com/localbuddha/ha-air-alarm-blueprint/blob/main/air_alarm_indicator.yaml
@@ -123,24 +125,40 @@ variables:
 triggers:
   - trigger: state
     entity_id: !input yellow_sensor
+    from: "off"
     to: "on"
     id: yellow_on
-    note: "Yellow level - drone threat."
+    note: "Yellow level - drone threat. From must be off so an unavailable blip does not re-announce."
   - trigger: state
     entity_id: !input red_sensor
+    from: "off"
     to: "on"
     id: red_on
     note: "Red level - priority over yellow."
   - trigger: state
     entity_id: !input red_sensor
+    from: "on"
     to: "off"
     id: red_off
     note: "Red lifted, alert still active - fall back to yellow."
   - trigger: state
     entity_id: !input alarm_sensor
+    from: "on"
     to: "off"
     id: clear
     note: "The aggregate sensor is the single all-clear source, so announcements are not duplicated."
+  - trigger: state
+    entity_id: !input red_sensor
+    from: "unavailable"
+    to: "on"
+    id: recover_red
+    note: "Recovery after an unavailable blip - colour only, no repeated announcement."
+  - trigger: state
+    entity_id: !input yellow_sensor
+    from: "unavailable"
+    to: "on"
+    id: recover_yellow
+    note: "Recovery after an unavailable blip - colour only, no repeated announcement."
   - trigger: homeassistant
     event: start
     id: startup
@@ -165,6 +183,7 @@ actions:
               media_player_entity_id: !input speaker
               message: !input msg_red
               language: !input language
+
       - conditions:
           - condition: trigger
             id: yellow_on
@@ -186,6 +205,7 @@ actions:
               media_player_entity_id: !input speaker
               message: !input msg_yellow
               language: !input language
+
       - conditions:
           - condition: trigger
             id: red_off
@@ -217,6 +237,7 @@ actions:
                       rgb_color: !input color_yellow
                     continue_on_error: true
             note: "Level downgraded without a repeated announcement, colour only."
+
       - conditions:
           - condition: trigger
             id: clear
@@ -246,6 +267,38 @@ actions:
             data:
               transition: 5
             continue_on_error: true
+
+      - conditions:
+          - condition: trigger
+            id:
+              - recover_red
+              - recover_yellow
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input red_sensor
+                    state: "on"
+                sequence:
+                  - action: light.turn_on
+                    target: !input indicator_light
+                    data:
+                      brightness_pct: !input brightness_pct
+                      rgb_color: !input color_red
+                    continue_on_error: true
+              - conditions:
+                  - condition: state
+                    entity_id: !input yellow_sensor
+                    state: "on"
+                sequence:
+                  - action: light.turn_on
+                    target: !input indicator_light
+                    data:
+                      brightness_pct: !input brightness_pct
+                      rgb_color: !input color_yellow
+                    continue_on_error: true
+            note: "Colour re-assertion after an unavailable blip, no TTS."
+
       - conditions:
           - condition: trigger
             id: startup
